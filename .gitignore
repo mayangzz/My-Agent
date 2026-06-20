@@ -1,0 +1,7 @@
+# 真实密钥,绝不提交
+config.local.env
+
+# 编译产物
+/mini-harness
+*.local
+.DS_Store
