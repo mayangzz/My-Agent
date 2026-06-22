@@ -1,6 +1,8 @@
-# mini-harness
+# My-Agent
 
-一个**从零手写**的最小 agent harness,Go 实现,后端接 DeepSeek。**故意只用标准库 `net/http`、不套任何 SDK**——目的就是把"裸模型 API 怎么变成一个会自己调工具干活的 agent"这件事,用最少的代码摊开给你看。
+> 🛠️ **这是一个练手项目**:从零手写一个最小 agent harness,用来**搞懂"裸大模型 API 到底怎么变成一个会自己调工具干活的 agent"**。当前是**基础版本**,功能会**慢慢完善**。欢迎提 [issue](https://github.com/mayangzz/My-Agent/issues) 和 PR 一起折腾。
+
+Go 实现,后端接 DeepSeek。**故意只用标准库 `net/http`、不套任何 SDK**——目的就是把循环、工具调用、上下文这些事用最少的代码摊开看清楚,而不是被框架糊住。
 
 ## 这是什么 / 不是什么
 
@@ -30,7 +32,7 @@ loop:
   (兜底:撞到 MaxSteps 就停,防跑飞)
 ```
 
-模型只会"开口点单"(说要调哪个工具),**真正去执行的永远是 harness**——模型自己碰不到文件、网络。这就是"tool use"和"harness 的手"的分工。
+模型只会"开口点单"(说要调哪个工具),**真正去执行的永远是 harness**——模型自己碰不到文件、网络。这就是 "tool use" 和 "harness 的手" 的分工。
 
 ## 跑起来
 
@@ -41,30 +43,40 @@ go run .
 
 ```
 you> 现在几点了?
-agent> 现在是 2026年6月20日 下午4点46分。
+agent> 现在是 2026年6月22日 ...
 
 you> 读取 /etc/hostname 告诉我主机名
 agent> ...
 ```
 
-跑的时候你会看到一行 `method=Agent.Run step=1 tool=now args={}`——那就是循环在工作:模型这一步决定调 `now` 工具。
+跑的时候会看到一行 `method=Agent.Run step=1 tool=now args={}`——那就是循环在工作:模型这一步决定调 `now` 工具。
 
 ## 加一个自己的工具
 
-在 `harness/tools.go` 照着 `NowTool` / `ReadFileTool` 写一个,然后在 `main.go` 里 `reg.Add(YourTool())`。一个工具就三件事:**名字 + 给模型看的参数 schema + 真正执行的 Go 函数**。比如你能很快加个 `http_get`、`run_sql`、`lark_send` 把它接到你自己的系统。
+在 `harness/tools.go` 照着 `NowTool` / `ReadFileTool` 写一个,然后在 `main.go` 里 `reg.Add(YourTool())`。一个工具就三件事:**名字 + 给模型看的参数 schema + 真正执行的 Go 函数**。
 
 ## 配置与安全
 
 - 配置走 `config.local.env`(`DEEPSEEK_API_KEY` / `DEEPSEEK_BASE_URL` / `DEEPSEEK_MODEL`),已被 `.gitignore` 忽略,**密钥不进 git**。环境变量同名可覆盖。
-- 模型默认 `deepseek-v4-pro`;DeepSeek 是 OpenAI 兼容接口,换成别的兼容模型只改 `config.local.env` 即可。
+- 模型默认 `deepseek-v4-pro`;DeepSeek 是 OpenAI 兼容接口,换别的兼容模型只改 `config.local.env` 即可。
 
-## 接下来可以往上加(Claude Code 比这多做的事)
+## 路线图(待完善)
 
-这版只有骨架。真要长成"好用",还差这些——每一项都是一道工程:
-- **流式输出**(别等整段才出)
-- **权限/沙箱**(执行危险工具前先确认)
-- **上下文压缩**(聊久了不爆窗口)
-- **更稳的工具**(改文件要 diff、行定位、防误改)
-- **subagent / 并行**、**MCP 接入**、**错误重试与跑偏纠正**
+基础版只搭了骨架,以下是已知缺口,会逐步补上(也欢迎来认领):
 
-骨架就在 `agent.go` 那个循环里,往上加料即可。
+- [ ] **安全闸**:工具无沙箱,`read_file` 现在能读任意路径(含密钥 / `~/.ssh`)。要加根目录约束 + 危险操作确认。
+- [ ] **对话记忆**:REPL 每轮重开,记不住上下文。要跨轮累积消息。
+- [ ] **项目感(WorkDir)**:工具锁到某工作目录,启动时把目录树注进 system prompt。
+- [ ] **健壮性**:HTTP 重试 / 限流退避;按 rune 安全截断工具输出。
+- [ ] **流式输出**:别等整段才出。
+- [ ] **上下文管理**:长任务的压缩,避免撑爆窗口。
+- [ ] **MCP 接入**:实现 MCP client,自动从外部 server 发现并注册工具。
+- [ ] **观测性**:打印 token usage / 成本。
+
+## 参与
+
+练手项目,欢迎一起折腾:发现问题或有想法就提 issue;想加功能就 fork → PR。路线图里任意一条都可以认领。
+
+## License
+
+[MIT](LICENSE)
