@@ -8,7 +8,7 @@ import (
 	"os"
 	"strings"
 
-	"github.com/mayangzz/mini-harness/harness"
+	"github.com/mayangzz/My-Agent/harness"
 )
 
 const systemPrompt = `You are a small agent running inside a minimal harness.

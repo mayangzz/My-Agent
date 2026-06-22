@@ -1,3 +1,3 @@
-module github.com/mayangzz/mini-harness
+module github.com/mayangzz/My-Agent
 
 go 1.24
