@@ -123,6 +123,7 @@ REPL 里 `/reset` 清空当前 session 记忆。
 
 ## 变更记录
 
+- **2026-06-23** —— 修 bug:`read_file` 截断原本按字节切,会把多字节字符(中文)从中间切断、产生非法 UTF-8;改为退到 rune 边界安全截断。
 - **2026-06-23** —— 从"最小单文件 harness"演进为可配置工程版:
   - 抽出 `settings`(系统提示词/模型/max_steps/记忆后端 → `settings.json`),`main` 瘦身。
   - 新增 `harness.Memory` 接口 + `memstore`(inmem / postgres / redis 三实现,启动可选,默认 postgres);`Agent.Run` 改为带 `session` 的记忆循环,**跨轮记忆**落地。

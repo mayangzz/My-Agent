@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"time"
+	"unicode/utf8"
 )
 
 // Registry 是工具注册表:按名字存工具,既能导出 schema 给模型,也能按名字执行。
@@ -83,8 +84,13 @@ func ReadFileTool() Tool {
 			if err != nil {
 				return "", err
 			}
-			if len(b) > 8000 { // 截断,别把上下文撑爆
-				b = append(b[:8000], []byte("\n...(truncated)")...)
+			const maxBytes = 8000
+			if len(b) > maxBytes { // 截断,别把上下文撑爆
+				cut := maxBytes
+				for cut > 0 && !utf8.RuneStart(b[cut]) { // 退到 rune 边界,别切断多字节字符(如中文)
+					cut--
+				}
+				b = append(b[:cut:cut], []byte("\n...(truncated)")...)
 			}
 			return string(b), nil
 		},
