@@ -1,8 +1,10 @@
 # My-Agent
 
-> 🛠️ **这是一个练手项目**:从零手写一个最小 agent harness,用来**搞懂"裸大模型 API 到底怎么变成一个会自己调工具干活的 agent"**。当前是**基础版本**,功能会**慢慢完善**。欢迎提 [issue](https://github.com/mayangzz/My-Agent/issues) 和 PR 一起折腾。
+> 🛠️ 从零手写一个 agent harness,**搞懂"裸大模型 API 到底怎么变成一个会自己调工具干活的 agent"**。目标是做成一个**好用、可演进到企业级、可开源**的 agent;现在是基础工程版,会持续完善。欢迎提 [issue](https://github.com/mayangzz/My-Agent/issues) 和 PR。
+>
+> 📖 想通读整个项目(架构 / 数据流 / 配置体系 / 路线图 / 变更记录)看 **[ARCHITECTURE.md](ARCHITECTURE.md)**。
 
-Go 实现,后端接 DeepSeek。**故意只用标准库 `net/http`、不套任何 SDK**——目的就是把循环、工具调用、上下文这些事用最少的代码摊开看清楚,而不是被框架糊住。
+Go 实现,后端接 DeepSeek。harness 核心**故意只用标准库 `net/http`、不套 SDK**——把循环、工具、上下文摊开看清楚;存储等外围则用成熟库(pgx / go-redis)。
 
 ## 这是什么 / 不是什么
 
@@ -17,8 +19,12 @@ Go 实现,后端接 DeepSeek。**故意只用标准库 `net/http`、不套任何
 | 会话状态 | `harness/types.go` (`Message`) | 一个消息列表(system / user / assistant / tool 结果),每轮往里追加 |
 | 模型客户端 | `harness/client.go` | 把消息 + 工具定义 POST 给 DeepSeek,拿回一条回复 |
 | 工具注册表 | `harness/tools.go` | 每个工具 = 定义(名字/描述/参数 schema) + 真正执行它的 Go 函数 |
-| 循环 | `harness/agent.go` | **harness 的灵魂**:调模型 → 有工具调用就执行、塞回结果 → 再调,直到模型给最终答案 |
-| 装配 + REPL | `main.go` | 读配置、注册工具、起一个命令行循环 |
+| 循环 | `harness/agent.go` | **harness 的灵魂**:调模型 → 有工具调用就执行、塞回结果 → 再调,直到最终答案;带 session 记忆 |
+| 记忆 | `harness/memory.go` + `memstore/` | `Memory` 接口 + 三种实现(inmem / postgres / redis),启动可选 |
+| 设置 / 后台 | `settings/` + `admin/` | 系统提示词等抽到 `settings.json`,本地后台网页可改 |
+| 装配 + REPL | `main.go` | 读密钥+设置、注册工具、起命令行循环 |
+
+> 完整目录结构与数据流见 [ARCHITECTURE.md](ARCHITECTURE.md)。
 
 ## 灵魂:那个循环(`harness/agent.go`)
 
@@ -37,19 +43,20 @@ loop:
 ## 跑起来
 
 ```bash
-cp config.example.env config.local.env   # 填入你的 DEEPSEEK_API_KEY
-go run .
+cp config.example.json config.local.json   # 填 deepseek_api_key(默认记忆后端是 postgres,本地要有库)
+go run .                  # REPL
+go run . -memory inmem    # 临时换内存后端(无需 DB,重启即丢)
+go run . admin            # 本地后台 http://127.0.0.1:7788,网页改设置
 ```
 
 ```
-you> 现在几点了?
-agent> 现在是 2026年6月22日 ...
-
-you> 读取 /etc/hostname 告诉我主机名
-agent> ...
+you> 我叫马炀,帮我记住
+agent> 好的,马炀 ...
+you> 我刚才说我叫什么?
+agent> 你叫马炀。       # ← 跨轮记忆生效
 ```
 
-跑的时候会看到一行 `method=Agent.Run step=1 tool=now args={}`——那就是循环在工作:模型这一步决定调 `now` 工具。
+跑的时候会看到 `method=Agent.Run step=1 tool=now args={}`——那是循环在工作。REPL 里 `/reset` 清空当前会话记忆。
 
 ## 加一个自己的工具
 
@@ -57,21 +64,14 @@ agent> ...
 
 ## 配置与安全
 
-- 配置走 `config.local.env`(`DEEPSEEK_API_KEY` / `DEEPSEEK_BASE_URL` / `DEEPSEEK_MODEL`),已被 `.gitignore` 忽略,**密钥不进 git**。环境变量同名可覆盖。
-- 模型默认 `deepseek-v4-pro`;DeepSeek 是 OpenAI 兼容接口,换别的兼容模型只改 `config.local.env` 即可。
+两层,职责不重叠(详见 [ARCHITECTURE.md](ARCHITECTURE.md)):
 
-## 路线图(待完善)
+- **密钥/连接串** → `config.local.json`(DeepSeek key、PG DSN、Redis 地址),**gitignored,绝不进 git、绝不进后台网页**。
+- **可调设置** → `settings.json`(系统提示词、模型、max_steps、记忆后端),后台网页可改,缺失会按默认生成。
 
-基础版只搭了骨架,以下是已知缺口,会逐步补上(也欢迎来认领):
+## 路线图
 
-- [ ] **安全闸**:工具无沙箱,`read_file` 现在能读任意路径(含密钥 / `~/.ssh`)。要加根目录约束 + 危险操作确认。
-- [ ] **对话记忆**:REPL 每轮重开,记不住上下文。要跨轮累积消息。
-- [ ] **项目感(WorkDir)**:工具锁到某工作目录,启动时把目录树注进 system prompt。
-- [ ] **健壮性**:HTTP 重试 / 限流退避;按 rune 安全截断工具输出。
-- [ ] **流式输出**:别等整段才出。
-- [ ] **上下文管理**:长任务的压缩,避免撑爆窗口。
-- [ ] **MCP 接入**:实现 MCP client,自动从外部 server 发现并注册工具。
-- [ ] **观测性**:打印 token usage / 成本。
+已知缺口与企业级待补项(安全闸 / 健壮性 / 流式 / 上下文压缩 / 可观测 / MCP / 语义记忆…)统一维护在 **[ARCHITECTURE.md 的路线图](ARCHITECTURE.md#路线图待完善欢迎认领)**,欢迎认领。
 
 ## 参与
 

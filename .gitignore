@@ -1,7 +1,12 @@
-# 真实密钥,绝不提交
+# 本地密钥/连接串,绝不提交
+config.local.json
 config.local.env
 
+# 本地运行时设置(后台改写;默认值由代码生成)
+settings.json
+
 # 编译产物
+/My-Agent
 /mini-harness
 *.local
 .DS_Store

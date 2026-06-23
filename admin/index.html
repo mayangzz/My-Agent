@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>My-Agent 后台</title>
+<style>
+  body{font-family:-apple-system,"PingFang SC","Helvetica Neue",Arial,sans-serif;color:#1b1b18;
+       background:#f6f6f3;max-width:760px;margin:40px auto;padding:0 22px;line-height:1.7}
+  h1{font-size:26px;margin:0 0 4px}
+  .sub{color:#8e8e82;margin:0 0 28px}
+  .card{background:#fff;border:1px solid #e6e6df;border-radius:14px;padding:22px 24px;margin-bottom:18px}
+  label{display:block;font-weight:600;margin:0 0 6px;font-size:14px}
+  .hint{color:#8e8e82;font-weight:400;font-size:13px}
+  textarea,input,select{width:100%;box-sizing:border-box;border:1px solid #e6e6df;border-radius:10px;
+       padding:10px 12px;font:inherit;font-size:14px;background:#fff}
+  textarea{min-height:140px;resize:vertical}
+  .row{display:flex;gap:16px}.row>div{flex:1}
+  button{background:#059669;color:#fff;border:0;border-radius:10px;padding:11px 22px;font:inherit;
+       font-weight:600;cursor:pointer}
+  button:hover{background:#047857}
+  #warn{display:none;color:#c0392b;font-size:13px;margin-top:8px}
+  #msg{margin-left:14px;color:#059669;font-size:14px}
+  .field{margin-bottom:18px}.field:last-child{margin-bottom:0}
+</style>
+</head>
+<body>
+  <h1>My-Agent 后台</h1>
+  <p class="sub">改这里的设置 → 保存写入 settings.json → 下次启动 agent 生效(密钥不在这里,在 config.local.env)</p>
+
+  <div class="card">
+    <div class="field">
+      <label>系统提示词 <span class="hint">system prompt —— agent 的人设与规则</span></label>
+      <textarea id="system_prompt"></textarea>
+    </div>
+    <div class="row">
+      <div class="field">
+        <label>模型 <span class="hint">model</span></label>
+        <input id="model" type="text">
+      </div>
+      <div class="field">
+        <label>最大步数 <span class="hint">max_steps,防跑飞</span></label>
+        <input id="max_steps" type="number" min="1">
+      </div>
+    </div>
+    <div class="field">
+      <label>记忆后端 <span class="hint">memory backend</span></label>
+      <select id="backend">
+        <option value="postgres">postgres —— 落盘持久(默认)</option>
+        <option value="redis">redis —— 对话维度,带 TTL 自动过期</option>
+        <option value="inmem">inmem —— 纯内存</option>
+      </select>
+      <div id="warn">⚠ inmem 为纯内存,进程重启后对话记忆全部丢失。</div>
+    </div>
+  </div>
+
+  <button onclick="save()">保存</button><span id="msg"></span>
+
+<script>
+const $ = id => document.getElementById(id);
+function checkWarn(){ $("warn").style.display = $("backend").value === "inmem" ? "block" : "none"; }
+$("backend").addEventListener("change", checkWarn);
+
+async function load(){
+  const s = await (await fetch("/api/settings")).json();
+  $("system_prompt").value = s.system_prompt || "";
+  $("model").value = s.model || "";
+  $("max_steps").value = s.max_steps || 8;
+  $("backend").value = (s.memory && s.memory.backend) || "postgres";
+  checkWarn();
+}
+async function save(){
+  const body = {
+    system_prompt: $("system_prompt").value,
+    model: $("model").value,
+    max_steps: parseInt($("max_steps").value, 10),
+    memory: { backend: $("backend").value }
+  };
+  const r = await fetch("/api/settings", {method:"PUT", headers:{"Content-Type":"application/json"}, body: JSON.stringify(body)});
+  $("msg").textContent = r.ok ? "已保存 ✓" : "保存失败";
+  setTimeout(()=>$("msg").textContent="", 2500);
+}
+load();
+</script>
+</body>
+</html>
