@@ -32,8 +32,9 @@ type FunctionDef struct {
 	Parameters  map[string]any `json:"parameters"` // JSON Schema
 }
 
-// Tool = 工具定义 + 真正执行它的 Go 函数(harness 的"手")。
+// Tool = 工具定义 + 敏感度 + 真正执行它的 Go 函数(harness 的"手")。
 type Tool struct {
-	Def FunctionDef
-	Run func(args json.RawMessage) (string, error)
+	Def         FunctionDef
+	Sensitivity string // read | write | exec —— 权限策略按它决定 allow/ask/deny
+	Run         func(args json.RawMessage) (string, error)
 }

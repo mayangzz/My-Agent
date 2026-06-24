@@ -13,10 +13,11 @@ type Memory struct {
 }
 
 type Settings struct {
-	SystemPrompt string `json:"system_prompt"`
-	Model        string `json:"model"`
-	MaxSteps     int    `json:"max_steps"`
-	Memory       Memory `json:"memory"`
+	SystemPrompt string            `json:"system_prompt"`
+	Model        string            `json:"model"`
+	MaxSteps     int               `json:"max_steps"`
+	Memory       Memory            `json:"memory"`
+	Permissions  map[string]string `json:"permissions"` // 工具敏感度 -> allow|ask|deny
 }
 
 func Default() *Settings {
@@ -27,6 +28,11 @@ func Default() *Settings {
 		Model:    "deepseek-v4-pro",
 		MaxSteps: 8,
 		Memory:   Memory{Backend: "postgres"},
+		Permissions: map[string]string{
+			"read":  "allow", // 只读默认放行
+			"write": "ask",   // 写默认问
+			"exec":  "ask",   // 执行默认问
+		},
 	}
 }
 

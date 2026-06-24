@@ -11,8 +11,28 @@ type Agent struct {
 	Client   *Client
 	Tools    *Registry
 	Memory   Memory
+	Perms    Perms                     // 按敏感度的权限策略
+	Confirm  func(prompt string) bool  // ask 时怎么征求同意;为 nil 则 ask 一律拒
 	System   string
 	MaxSteps int
+}
+
+// execTool 在执行工具前过一道权限闸:按敏感度 allow / ask / deny。
+func (a *Agent) execTool(tc ToolCall) string {
+	const method = "Agent.execTool"
+	sens := a.Tools.Sensitivity(tc.Function.Name)
+	switch a.Perms.Action(sens) {
+	case Deny:
+		log.Printf("method=%s tool=%s sensitivity=%s decision=deny", method, tc.Function.Name, sens)
+		return fmt.Sprintf("error: tool %q denied by policy (sensitivity=%s)", tc.Function.Name, sens)
+	case Ask:
+		prompt := fmt.Sprintf("允许执行 %s [%s]? 参数: %s", tc.Function.Name, sens, tc.Function.Arguments)
+		if a.Confirm == nil || !a.Confirm(prompt) {
+			log.Printf("method=%s tool=%s decision=denied-by-user", method, tc.Function.Name)
+			return fmt.Sprintf("error: tool %q denied by user", tc.Function.Name)
+		}
+	}
+	return a.Tools.Exec(tc) // allow / 已确认 → 真执行
 }
 
 // Run 跑一个任务:先从 Memory 取回该 session 的历史,循环直到模型给最终答案或撞到 MaxSteps。
@@ -54,7 +74,7 @@ func (a *Agent) Run(ctx context.Context, session, userInput string) (string, err
 
 		for _, tc := range reply.ToolCalls { // ③ 模型要调工具(一轮可能多个)
 			log.Printf("method=%s step=%d tool=%s args=%s", method, step, tc.Function.Name, tc.Function.Arguments)
-			result := a.Tools.Exec(tc) // 真执行(harness 的"手")
+			result := a.execTool(tc) // 过权限闸后执行
 			toolMsg := Message{Role: "tool", ToolCallID: tc.ID, Content: result}
 			msgs = append(msgs, toolMsg) // ④ 结果塞回上下文
 			if err := a.Memory.Append(ctx, session, toolMsg); err != nil {

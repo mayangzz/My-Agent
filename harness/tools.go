@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
+	"strings"
 	"time"
 	"unicode/utf8"
 )
@@ -19,6 +21,14 @@ func NewRegistry() *Registry {
 
 func (r *Registry) Add(t Tool) {
 	r.tools[t.Def.Name] = t
+}
+
+// Sensitivity 返回某工具的敏感度(用于权限决策);工具不存在返回空串。
+func (r *Registry) Sensitivity(name string) string {
+	if t, ok := r.tools[name]; ok {
+		return t.Sensitivity
+	}
+	return ""
 }
 
 // Schemas 导出所有工具定义,随每次请求发给模型。
@@ -53,10 +63,28 @@ func NowTool() Tool {
 			Description: "Return the current local date and time.",
 			Parameters:  map[string]any{"type": "object", "properties": map[string]any{}},
 		},
+		Sensitivity: "read",
 		Run: func(json.RawMessage) (string, error) {
 			return time.Now().Format("2006-01-02 15:04:05 Mon"), nil
 		},
 	}
+}
+
+// isSecretPath 判定一个路径像不像密钥/凭证文件,这类一律拒读(不受权限策略影响)。
+func isSecretPath(abs string) bool {
+	low := strings.ToLower(abs)
+	base := strings.ToLower(filepath.Base(abs))
+	switch {
+	case base == "config.local.json" || strings.HasSuffix(base, ".local.json"):
+		return true
+	case strings.HasSuffix(base, ".env") || base == ".npmrc" || base == ".netrc":
+		return true
+	case strings.Contains(low, "/.ssh/") || strings.Contains(low, "id_rsa") || strings.Contains(low, "id_ed25519"):
+		return true
+	case strings.Contains(low, "credential") || strings.Contains(low, "secret") || strings.Contains(low, ".pem"):
+		return true
+	}
+	return false
 }
 
 // ReadFileTool 读取一个文本文件,演示一个带参数的工具。
@@ -73,6 +101,7 @@ func ReadFileTool() Tool {
 				"required": []string{"path"},
 			},
 		},
+		Sensitivity: "read",
 		Run: func(args json.RawMessage) (string, error) {
 			var p struct {
 				Path string `json:"path"`
@@ -80,7 +109,14 @@ func ReadFileTool() Tool {
 			if err := json.Unmarshal(args, &p); err != nil {
 				return "", fmt.Errorf("bad args: %w", err)
 			}
-			b, err := os.ReadFile(p.Path)
+			abs, err := filepath.Abs(p.Path)
+			if err != nil {
+				return "", fmt.Errorf("bad path: %w", err)
+			}
+			if isSecretPath(abs) { // 硬拒密钥/凭证文件,不受权限策略影响
+				return "", fmt.Errorf("refused: %q looks like a secret/credential file", p.Path)
+			}
+			b, err := os.ReadFile(abs)
 			if err != nil {
 				return "", err
 			}

@@ -65,12 +65,26 @@ func main() {
 	reg := harness.NewRegistry()
 	reg.Add(harness.NowTool())
 	reg.Add(harness.ReadFileTool())
-	agent := &harness.Agent{Client: client, Tools: reg, Memory: mem, System: st.SystemPrompt, MaxSteps: st.MaxSteps}
+
+	sc := bufio.NewScanner(os.Stdin)
+	sc.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+	confirm := func(prompt string) bool { // ask 策略下在 REPL 里征求同意
+		fmt.Printf("%s (y/N) ", prompt)
+		if !sc.Scan() {
+			return false
+		}
+		ans := strings.ToLower(strings.TrimSpace(sc.Text()))
+		return ans == "y" || ans == "yes"
+	}
+
+	agent := &harness.Agent{
+		Client: client, Tools: reg, Memory: mem,
+		Perms: harness.Perms(st.Permissions), Confirm: confirm,
+		System: st.SystemPrompt, MaxSteps: st.MaxSteps,
+	}
 
 	const session = "cli" // 固定 session,跨轮(持久后端下还跨重启)记忆;/reset 清空
 	fmt.Printf("My-Agent ready (model=%s, memory=%s). Type a task, /reset to clear, Ctrl-D to quit.\n", st.Model, backend)
-	sc := bufio.NewScanner(os.Stdin)
-	sc.Buffer(make([]byte, 0, 64*1024), 1024*1024)
 	for {
 		fmt.Print("\nyou> ")
 		if !sc.Scan() {

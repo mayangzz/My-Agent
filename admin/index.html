@@ -54,6 +54,20 @@
     </div>
   </div>
 
+  <div class="card">
+    <div class="field">
+      <label>工具操作权限 <span class="hint">每类工具:allow 放行 / ask 执行前问一次 / deny 禁止</span></label>
+      <div class="row">
+        <div><label>read 只读</label>
+          <select id="perm_read"><option value="allow">allow</option><option value="ask">ask</option><option value="deny">deny</option></select></div>
+        <div><label>write 写</label>
+          <select id="perm_write"><option value="allow">allow</option><option value="ask">ask</option><option value="deny">deny</option></select></div>
+        <div><label>exec 执行</label>
+          <select id="perm_exec"><option value="allow">allow</option><option value="ask">ask</option><option value="deny">deny</option></select></div>
+      </div>
+    </div>
+  </div>
+
   <button onclick="save()">保存</button><span id="msg"></span>
 
 <script>
@@ -67,6 +81,10 @@ async function load(){
   $("model").value = s.model || "";
   $("max_steps").value = s.max_steps || 8;
   $("backend").value = (s.memory && s.memory.backend) || "postgres";
+  const p = s.permissions || {};
+  $("perm_read").value = p.read || "allow";
+  $("perm_write").value = p.write || "ask";
+  $("perm_exec").value = p.exec || "ask";
   checkWarn();
 }
 async function save(){
@@ -74,7 +92,8 @@ async function save(){
     system_prompt: $("system_prompt").value,
     model: $("model").value,
     max_steps: parseInt($("max_steps").value, 10),
-    memory: { backend: $("backend").value }
+    memory: { backend: $("backend").value },
+    permissions: { read: $("perm_read").value, write: $("perm_write").value, exec: $("perm_exec").value }
   };
   const r = await fetch("/api/settings", {method:"PUT", headers:{"Content-Type":"application/json"}, body: JSON.stringify(body)});
   $("msg").textContent = r.ok ? "已保存 ✓" : "保存失败";

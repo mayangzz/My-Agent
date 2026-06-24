@@ -99,6 +99,17 @@ My-Agent/
 
 未来要"按意思召回"的语义记忆(RAG),加一个 pgvector / Qdrant 实现即可,接口不变。
 
+## 操作权限(安全闸)
+
+工具执行前过一道权限闸,防止 agent(或被注入的提示)乱动危险操作。两层:
+
+1. **按敏感度的策略**:每个工具标 `Sensitivity`(`read` / `write` / `exec`);`settings.json` 的 `permissions` 给每类一个动作 `allow` / `ask` / `deny`(默认 `read:allow, write:ask, exec:ask`,后台可改)。
+   - `ask` → 执行前在 REPL 弹确认(`允许执行 X? y/N`);headless/后台无确认者时**默认拒**。
+   - 被拒就把 "denied" 当工具结果喂回模型,它能换路子(自适应)。
+2. **密钥硬拒**:不论策略如何,`read_file` 一律拒读像密钥/凭证的文件——`config.local.json`、`*.env`、`~/.ssh/*`、`id_rsa`、`*.pem`、含 secret/credential 的路径。**堵死"agent 读出你的 API key"**。
+
+> 代码:`harness/perms.go`(策略)、`harness/agent.go` 的 `execTool`(闸)、`harness/tools.go` 的 `isSecretPath`(密钥硬拒)。
+
 ## 运行
 
 ```bash
@@ -111,7 +122,7 @@ REPL 里 `/reset` 清空当前 session 记忆。
 
 ## 路线图(待完善,欢迎认领)
 
-- [ ] **安全闸**:工具沙箱 / 路径白名单 / 危险操作确认(当前 `read_file` 可读任意路径)。
+- [x] **安全闸 v1**:敏感度策略(allow/ask/deny)+ ask 确认 + 密钥文件硬拒。**待补**:WorkDir 根目录限定(只许在某目录树下读写)、工具级沙箱。
 - [ ] **健壮性**:HTTP 重试 + 限流退避;工具输出按 rune 安全截断。
 - [ ] **流式输出**。
 - [ ] **上下文压缩**:长对话不撑爆窗口。
@@ -123,6 +134,7 @@ REPL 里 `/reset` 清空当前 session 记忆。
 
 ## 变更记录
 
+- **2026-06-24** —— **操作权限(安全闸)**:工具加 `Sensitivity`(read/write/exec)+ 按敏感度的 allow/ask/deny 策略(settings.json `permissions`,后台可改);`ask` 在 REPL 弹确认;`read_file` 硬拒密钥/凭证文件(config.local.json / *.env / ~/.ssh / id_rsa / *.pem…)。三种场景已实测:密钥拒读、ask 拒、ask 准。
 - **2026-06-23** —— 修 bug:`read_file` 截断原本按字节切,会把多字节字符(中文)从中间切断、产生非法 UTF-8;改为退到 rune 边界安全截断。
 - **2026-06-23** —— 从"最小单文件 harness"演进为可配置工程版:
   - 抽出 `settings`(系统提示词/模型/max_steps/记忆后端 → `settings.json`),`main` 瘦身。
