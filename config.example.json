@@ -3,5 +3,7 @@
   "deepseek_base_url": "https://api.deepseek.com",
   "postgres_dsn": "postgres://localhost:5432/myagent?sslmode=disable",
   "redis_addr": "127.0.0.1:6379",
-  "redis_password": ""
+  "redis_password": "",
+  "docker_host": "",
+  "docker_image": "my-agent:latest"
 }

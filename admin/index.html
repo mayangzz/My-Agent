@@ -52,6 +52,13 @@
       </select>
       <div id="warn">⚠ inmem 为纯内存,进程重启后对话记忆全部丢失。</div>
     </div>
+    <div class="field">
+      <label>子 agent 执行后端 <span class="hint">runner —— spawn_subagent 在哪儿跑</span></label>
+      <select id="runner">
+        <option value="local">local —— 本进程内(默认,无需 Docker)</option>
+        <option value="docker">docker —— 一次性容器隔离(需在 config.local.json 给 docker 地址/镜像)</option>
+      </select>
+    </div>
   </div>
 
   <div class="card">
@@ -81,6 +88,7 @@ async function load(){
   $("model").value = s.model || "";
   $("max_steps").value = s.max_steps || 8;
   $("backend").value = (s.memory && s.memory.backend) || "postgres";
+  $("runner").value = (s.runner && s.runner.mode) || "local";
   const p = s.permissions || {};
   $("perm_read").value = p.read || "allow";
   $("perm_write").value = p.write || "ask";
@@ -93,6 +101,7 @@ async function save(){
     model: $("model").value,
     max_steps: parseInt($("max_steps").value, 10),
     memory: { backend: $("backend").value },
+    runner: { mode: $("runner").value },
     permissions: { read: $("perm_read").value, write: $("perm_write").value, exec: $("perm_exec").value }
   };
   const r = await fetch("/api/settings", {method:"PUT", headers:{"Content-Type":"application/json"}, body: JSON.stringify(body)});
