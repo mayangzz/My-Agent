@@ -57,6 +57,7 @@ My-Agent/
 │   └── agent.go           #   那个循环(带 session 记忆 + 权限闸)
 ├── memstore/              # Memory 的几种实现(启动时选)
 │   ├── memstore.go        #   Config + New() 工厂
+│   ├── layered.go         #   分层记忆装饰器(按天归档 + 每日摘要 + 保留期),包住任意后端
 │   ├── filewiki.go        #   本地文件 .jsonl(默认,无需 DB,落盘持久)
 │   ├── postgres.go        #   Postgres(落盘持久)
 │   ├── redis.go           #   Redis(对话维度,带 TTL)
@@ -109,7 +110,24 @@ My-Agent/
 | `inmem` | 开发/试跑 | 纯内存,**重启即丢**(启动会打印提示) |
 | `none` | 一次性问答 | 不做记忆,每轮都是干净的、无跨轮上下文 |
 
-未来要"按意思召回"的语义记忆(RAG),加一个 pgvector / Qdrant 实现即可,接口不变。
+### 分层记忆(短期 + 长期,架在后端之上)
+
+光把原始消息堆着会越攒越大、也不分轻重。`Layered`(`memstore/layered.go`)是一层**装饰器**:它本身实现 `Memory`、内部包一个上面的后端,把记忆分成短期和长期——**两者共用同一套抽象接口,跟具体后端无关**。`daily_summary` 开关控制(filewiki/postgres/redis 下默认开)。
+
+底层 key 约定(后端只当普通 session 名,filewiki 落成按天的目录):
+
+```
+<base>/<YYYY-MM-DD>/raw      当天原始消息(短期/工作记忆)
+<base>/<YYYY-MM-DD>/digest   当天摘要(长期记忆,单条 ≤summary_max_chars)
+<base>/_index               出现过哪些天(保留期清理用)
+```
+
+- **每日摘要**:一轮对话的最终答案落地后,**异步**把当天对话重新总结成一份 ≤2000 字摘要覆盖写回;进程退出前再同步 `Flush` 一次,防短会话丢摘要。不用定时任务——"每次对话后更新",一天结束时摘要自然就是完整的。
+- **召回(带权重)**:`Load` 时按**新近度**从近往老装每日摘要,装满 `recall_budget` 字符预算为止(老的丢),再按时间正序拼在当天原始对话前面 → agent 记得"前天、昨天"。语义相关度权重以后接 embedding 再加,接口不变。
+- **保留期**:默认 **30 天**(`retention_days` 可调),`Load` 时顺手把超期的天连原始带摘要一起清掉、更新 `_index`。
+- **`/reset`** 只清当天的工作记忆,不动更早的每日摘要——别误删积累的长期记忆。
+
+> 子 agent 用未分层的 baseMem(临时,不需要长期记忆/每日总结)。配置在 `settings.json` 的 `memory.{daily_summary,retention_days,summary_max_chars,recall_budget}`,后台可改。
 
 ## 子 agent 与执行后端(agent team)
 
@@ -168,6 +186,7 @@ REPL 里 `/reset` 清空当前 session 记忆。子命令 `subagent --role .. --
 
 ## 变更记录
 
+- **2026-06-26** —— **分层记忆(短期 + 长期)**:新增 `memstore/layered.go`——一个 `Memory` 装饰器,把对话按天归档(`<base>/<date>/raw`+`digest`,filewiki 落成按天目录),每轮对话后异步把当天总结成 ≤2000 字摘要、退出前 `Flush` 兜底;`Load` 按新近度权重 + `recall_budget` 预算召回近若干天摘要 + 当天原始,默认保留 `retention_days=30` 天、超期自动清理;`/reset` 只清当天不动历史摘要。短期/长期共用同一抽象接口、与后端无关(filewiki/postgres/redis 都能套)。settings 加 `memory.{daily_summary,retention_days,summary_max_chars,recall_budget}`,后台可改。recall/retention/digest 生成均已实测。
 - **2026-06-25** —— **记忆后端:首次选择 + 本地文件后端**:记忆后端改为"启动时选"而非默认+兜底——首次启动(无 settings.json)弹菜单让用户选、存盘记住,`-memory` 仍可覆盖。新增两实现:`filewiki`(本地 `.jsonl`,无需 DB/容器、落盘持久,设为新默认)、`none`(不做记忆);连同原 inmem/postgres/redis 共五种。`settings.Memory` 加 `dir`;admin 网页加全部后端选项。filewiki 跨进程持久、首次选择、none 无记忆均已实测。
 - **2026-06-25** —— **agent team(子 agent + 执行后端开关)**:新增内置工具 `spawn_subagent(role, task)` 让主 agent 派角色化子 agent 各司其职;抽出 `Runner` 接口(`harness/runner.go`),两实现 `runner/local.go`(本进程,默认,共用 Memory)、`runner/docker.go`(一次性容器隔离);`settings.json` 加 `runner.mode`(local/docker,后台可切),`config.local.json` 加 `docker_host` / `docker_image`;`main.go` 加 `subagent` 子命令(容器内入口,密钥读 env);新增 `Dockerfile`(18MB distroless 镜像)。local 与 docker 两条链路均已实测跑通(主 agent 派子 agent → 拿回结果)。
 - **2026-06-24** —— **操作权限(安全闸)**:工具加 `Sensitivity`(read/write/exec)+ 按敏感度的 allow/ask/deny 策略(settings.json `permissions`,后台可改);`ask` 在 REPL 弹确认;`read_file` 硬拒密钥/凭证文件(config.local.json / *.env / ~/.ssh / id_rsa / *.pem…)。三种场景已实测:密钥拒读、ask 拒、ask 准。

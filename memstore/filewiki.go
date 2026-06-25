@@ -32,16 +32,25 @@ func NewFileWiki(dir string) (*FileWiki, error) {
 	return &FileWiki{dir: dir}, nil
 }
 
-// path 把 session 名映射成一个安全的文件名(挡掉路径分隔符等,保留中文)。
+// path 把 session 名映射成文件路径。session 里的 "/" 当成子目录分隔
+// (于是分层记忆的 <base>/<date>/raw 落成按天分的目录),每段都做安全化、挡路径穿越。
 func (f *FileWiki) path(session string) string {
-	safe := strings.Map(func(r rune) rune {
-		switch r {
-		case '/', '\\', ':', '*', '?', '"', '<', '>', '|':
-			return '_'
+	parts := strings.Split(session, "/")
+	clean := make([]string, 0, len(parts))
+	for _, p := range parts {
+		p = strings.Map(func(r rune) rune {
+			switch r {
+			case '\\', ':', '*', '?', '"', '<', '>', '|':
+				return '_'
+			}
+			return r
+		}, p)
+		if p == "" || p == "." || p == ".." {
+			p = "_"
 		}
-		return r
-	}, session)
-	return filepath.Join(f.dir, safe+".jsonl")
+		clean = append(clean, p)
+	}
+	return filepath.Join(f.dir, filepath.Join(clean...)+".jsonl")
 }
 
 func (f *FileWiki) Append(ctx context.Context, session string, m harness.Message) error {
@@ -52,7 +61,11 @@ func (f *FileWiki) Append(ctx context.Context, session string, m harness.Message
 	if err != nil {
 		return fmt.Errorf("method=%s marshal: %w", method, err)
 	}
-	file, err := os.OpenFile(f.path(session), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+	p := f.path(session)
+	if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil { // 分层 key 会落到子目录
+		return fmt.Errorf("method=%s mkdir: %w", method, err)
+	}
+	file, err := os.OpenFile(p, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
 	if err != nil {
 		return fmt.Errorf("method=%s open: %w", method, err)
 	}

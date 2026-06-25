@@ -58,7 +58,9 @@ func main() {
 	}
 
 	ctx := context.Background()
-	mem, err := memstore.New(ctx, memstore.Config{
+	client := harness.NewClient(sec.DeepSeekBaseURL, sec.DeepSeekAPIKey, st.Model)
+
+	baseMem, err := memstore.New(ctx, memstore.Config{
 		Backend:       backend,
 		FileDir:       st.Memory.Dir,
 		PostgresDSN:   sec.PostgresDSN,
@@ -68,14 +70,22 @@ func main() {
 	if err != nil {
 		log.Fatalf("method=main memory: %v", err)
 	}
+
+	// 持久后端 + 开了 daily_summary → 套一层分层记忆(按天归档 + 每日摘要 + 保留期)。
+	mem := baseMem
 	switch backend {
 	case "inmem":
 		log.Printf("method=main memory=inmem warning: restart loses all conversation memory")
 	case "none":
 		log.Printf("method=main memory=none warning: no cross-turn memory at all")
+	default:
+		if st.Memory.DailySummary {
+			mem = memstore.NewLayered(baseMem, st.Memory.RetentionDays, st.Memory.SummaryMaxChars,
+				st.Memory.RecallBudget, dailySummarizer(client, st.Memory.SummaryMaxChars))
+			log.Printf("method=main memory=%s layered: retention=%dd summary_max=%d", backend, st.Memory.RetentionDays, st.Memory.SummaryMaxChars)
+		}
 	}
 
-	client := harness.NewClient(sec.DeepSeekBaseURL, sec.DeepSeekAPIKey, st.Model)
 	reg := harness.NewRegistry()
 	reg.Add(harness.NowTool())
 	reg.Add(harness.ReadFileTool())
@@ -89,14 +99,14 @@ func main() {
 		return ans == "y" || ans == "yes"
 	}
 
-	// 子 agent 工厂:按角色造一个专注的子 agent,共用同一 client/memory(状态面共享),
-	// 工具表不含 spawn_subagent —— 避免子 agent 再派子 agent 无限套娃。
+	// 子 agent 工厂:按角色造一个专注的子 agent。用未分层的 baseMem——子 agent 是临时的,
+	// 不需要长期记忆/每日摘要,省一次次总结调用;工具表也不含 spawn_subagent 防套娃。
 	buildSub := func(role string) *harness.Agent {
 		subReg := harness.NewRegistry()
 		subReg.Add(harness.NowTool())
 		subReg.Add(harness.ReadFileTool())
 		return &harness.Agent{
-			Client: client, Tools: subReg, Memory: mem,
+			Client: client, Tools: subReg, Memory: baseMem,
 			Perms: harness.Perms(st.Permissions), Confirm: confirm,
 			System: subagentSystem(role), MaxSteps: st.MaxSteps,
 		}
@@ -125,10 +135,19 @@ func main() {
 	}
 
 	const session = "cli" // 固定 session,跨轮(持久后端下还跨重启)记忆;/reset 清空
+
+	// 退出前把当天摘要同步落一次(异步那次可能被进程退出截断)。
+	flush := func() {
+		if lm, ok := mem.(*memstore.Layered); ok {
+			lm.Flush(ctx, session)
+		}
+	}
+
 	fmt.Printf("My-Agent ready (model=%s, memory=%s, runner=%s). Type a task, /reset to clear, Ctrl-D to quit.\n", st.Model, backend, st.Runner.Mode)
 	for {
 		fmt.Print("\nyou> ")
 		if !sc.Scan() {
+			flush()
 			return
 		}
 		input := strings.TrimSpace(sc.Text())
@@ -227,6 +246,23 @@ func pickBackend(sc *bufio.Scanner) string {
 		return "none"
 	default:
 		return "filewiki"
+	}
+}
+
+// dailySummarizer 返回一个把"一天的对话"总结成记忆摘要的函数(给分层记忆用)。
+func dailySummarizer(client *harness.Client, maxChars int) func(context.Context, string) (string, error) {
+	prompt := fmt.Sprintf("把下面这天的对话总结成一份「记忆摘要」,供你日后回忆与该用户的长期上下文。"+
+		"抓持久信息:用户是谁、偏好、做过的决定、结论、待办、关键事实;略去寒暄和一次性细节。"+
+		"用对话所用的语言,%d 字以内,直接给摘要正文、不要前后缀。", maxChars)
+	return func(ctx context.Context, conversation string) (string, error) {
+		reply, err := client.Chat(ctx, []harness.Message{
+			{Role: "system", Content: prompt},
+			{Role: "user", Content: conversation},
+		}, nil)
+		if err != nil {
+			return "", err
+		}
+		return reply.Content, nil
 	}
 }
 

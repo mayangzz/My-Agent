@@ -11,6 +11,12 @@ import (
 type Memory struct {
 	Backend string `json:"backend"`       // none | inmem | filewiki | postgres | redis
 	Dir     string `json:"dir,omitempty"` // filewiki 的存储目录(默认 memory)
+
+	// 分层记忆(按天归档 + 每日摘要 + 保留期),架在 backend 之上,与后端无关。
+	DailySummary    bool `json:"daily_summary"`     // 开关:每轮对话后异步刷新当天摘要
+	RetentionDays   int  `json:"retention_days"`    // 每日记忆保留天数,超期清理(默认 30)
+	SummaryMaxChars int  `json:"summary_max_chars"` // 每日摘要字数上限(默认 2000)
+	RecallBudget    int  `json:"recall_budget"`     // 召回每日摘要的字符预算,近的优先(默认 8000)
 }
 
 // Runner 决定子 agent(spawn_subagent)在哪儿跑。
@@ -34,8 +40,11 @@ func Default() *Settings {
 			"When you have the final answer, reply directly without calling a tool.",
 		Model:    "deepseek-v4-pro",
 		MaxSteps: 8,
-		Memory:   Memory{Backend: "filewiki", Dir: "memory"}, // 无需 DB/容器、落盘持久,最省事的默认
-		Runner:   Runner{Mode: "local"},
+		Memory: Memory{ // filewiki 无需 DB/容器、落盘持久,最省事的默认;分层记忆默认开
+			Backend: "filewiki", Dir: "memory",
+			DailySummary: true, RetentionDays: 30, SummaryMaxChars: 2000, RecallBudget: 8000,
+		},
+		Runner: Runner{Mode: "local"},
 		Permissions: map[string]string{
 			"read":  "allow", // 只读默认放行
 			"write": "ask",   // 写默认问

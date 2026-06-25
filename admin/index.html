@@ -55,6 +55,14 @@
       <div id="warn">⚠ 该后端没有持久记忆:进程重启(none 为每轮)后对话记忆丢失。</div>
     </div>
     <div class="field">
+      <label><input type="checkbox" id="daily_summary" style="width:auto;margin-right:6px"> 分层记忆 <span class="hint">按天归档 + 每日摘要 + 保留期(filewiki/postgres/redis 下生效)</span></label>
+      <div class="row" style="margin-top:8px">
+        <div><label>保留天数 <span class="hint">retention_days</span></label><input id="retention_days" type="number" min="1"></div>
+        <div><label>每日摘要字数 <span class="hint">summary_max_chars</span></label><input id="summary_max_chars" type="number" min="100"></div>
+        <div><label>召回预算 <span class="hint">recall_budget 字符</span></label><input id="recall_budget" type="number" min="0"></div>
+      </div>
+    </div>
+    <div class="field">
       <label>子 agent 执行后端 <span class="hint">runner —— spawn_subagent 在哪儿跑</span></label>
       <select id="runner">
         <option value="local">local —— 本进程内(默认,无需 Docker)</option>
@@ -89,7 +97,12 @@ async function load(){
   $("system_prompt").value = s.system_prompt || "";
   $("model").value = s.model || "";
   $("max_steps").value = s.max_steps || 8;
-  $("backend").value = (s.memory && s.memory.backend) || "postgres";
+  const m = s.memory || {};
+  $("backend").value = m.backend || "filewiki";
+  $("daily_summary").checked = m.daily_summary !== false;
+  $("retention_days").value = m.retention_days || 30;
+  $("summary_max_chars").value = m.summary_max_chars || 2000;
+  $("recall_budget").value = m.recall_budget || 8000;
   $("runner").value = (s.runner && s.runner.mode) || "local";
   const p = s.permissions || {};
   $("perm_read").value = p.read || "allow";
@@ -102,7 +115,13 @@ async function save(){
     system_prompt: $("system_prompt").value,
     model: $("model").value,
     max_steps: parseInt($("max_steps").value, 10),
-    memory: { backend: $("backend").value },
+    memory: {
+      backend: $("backend").value,
+      daily_summary: $("daily_summary").checked,
+      retention_days: parseInt($("retention_days").value, 10),
+      summary_max_chars: parseInt($("summary_max_chars").value, 10),
+      recall_budget: parseInt($("recall_budget").value, 10)
+    },
     runner: { mode: $("runner").value },
     permissions: { read: $("perm_read").value, write: $("perm_write").value, exec: $("perm_exec").value }
   };
