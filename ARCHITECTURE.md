@@ -55,11 +55,13 @@ My-Agent/
 │   ├── runner.go          #   Runner 接口 + spawn_subagent 工具
 │   ├── perms.go           #   权限策略(allow/ask/deny)
 │   └── agent.go           #   那个循环(带 session 记忆 + 权限闸)
-├── memstore/              # Memory 的几种实现(启动可选)
+├── memstore/              # Memory 的几种实现(启动时选)
 │   ├── memstore.go        #   Config + New() 工厂
+│   ├── filewiki.go        #   本地文件 .jsonl(默认,无需 DB,落盘持久)
+│   ├── postgres.go        #   Postgres(落盘持久)
+│   ├── redis.go           #   Redis(对话维度,带 TTL)
 │   ├── inmem.go           #   内存(重启即丢)
-│   ├── postgres.go        #   Postgres(默认,落盘持久)
-│   └── redis.go           #   Redis(对话维度,带 TTL)
+│   └── none.go            #   不做记忆
 ├── runner/                # Runner 的几种实现(子 agent 在哪儿跑,启动可选)
 │   ├── local.go           #   本进程内(默认,无需 Docker)
 │   └── docker.go          #   一次性容器隔离(需 docker 地址/镜像)
@@ -97,13 +99,15 @@ My-Agent/
 
 ## 记忆后端(启动可选)
 
-`settings.json` 里 `memory.backend` 选,或启动 `--memory xxx` 覆盖:
+记忆后端是 `Memory` 接口的一个实现,**启动时选**——不替你拍一个再兜底:首次启动(无 `settings.json`)会**问一嘴**让你选,选完存进 `settings.json`;之后直接用,`--memory xxx` 仍可临时覆盖,后台网页也能改。
 
 | backend | 适合 | 特点 |
 |---|---|---|
-| `postgres` | **默认**,持久/结构化记忆 | 落盘、可查询、事务;表 `agent_messages(session, seq, data jsonb)` |
-| `redis` | 对话/session 维度 | 一 session 一个 List,带 24h TTL 自动过期 |
+| `filewiki` | **默认**,无依赖的持久记忆 | 每 session 一个本地 `.jsonl`(逐条消息一行),无需 DB/容器,落盘持久、可直接打开看,JSONL 忠实保留工具调用 |
+| `postgres` | 结构化/可查询的持久记忆 | 落盘、可查询、事务;表 `agent_messages(session, seq, data jsonb)`;需在 config.local.json 配 DSN |
+| `redis` | 对话/session 维度 | 一 session 一个 List,带 24h TTL 自动过期;需配地址 |
 | `inmem` | 开发/试跑 | 纯内存,**重启即丢**(启动会打印提示) |
+| `none` | 一次性问答 | 不做记忆,每轮都是干净的、无跨轮上下文 |
 
 未来要"按意思召回"的语义记忆(RAG),加一个 pgvector / Qdrant 实现即可,接口不变。
 
@@ -164,6 +168,7 @@ REPL 里 `/reset` 清空当前 session 记忆。子命令 `subagent --role .. --
 
 ## 变更记录
 
+- **2026-06-25** —— **记忆后端:首次选择 + 本地文件后端**:记忆后端改为"启动时选"而非默认+兜底——首次启动(无 settings.json)弹菜单让用户选、存盘记住,`-memory` 仍可覆盖。新增两实现:`filewiki`(本地 `.jsonl`,无需 DB/容器、落盘持久,设为新默认)、`none`(不做记忆);连同原 inmem/postgres/redis 共五种。`settings.Memory` 加 `dir`;admin 网页加全部后端选项。filewiki 跨进程持久、首次选择、none 无记忆均已实测。
 - **2026-06-25** —— **agent team(子 agent + 执行后端开关)**:新增内置工具 `spawn_subagent(role, task)` 让主 agent 派角色化子 agent 各司其职;抽出 `Runner` 接口(`harness/runner.go`),两实现 `runner/local.go`(本进程,默认,共用 Memory)、`runner/docker.go`(一次性容器隔离);`settings.json` 加 `runner.mode`(local/docker,后台可切),`config.local.json` 加 `docker_host` / `docker_image`;`main.go` 加 `subagent` 子命令(容器内入口,密钥读 env);新增 `Dockerfile`(18MB distroless 镜像)。local 与 docker 两条链路均已实测跑通(主 agent 派子 agent → 拿回结果)。
 - **2026-06-24** —— **操作权限(安全闸)**:工具加 `Sensitivity`(read/write/exec)+ 按敏感度的 allow/ask/deny 策略(settings.json `permissions`,后台可改);`ask` 在 REPL 弹确认;`read_file` 硬拒密钥/凭证文件(config.local.json / *.env / ~/.ssh / id_rsa / *.pem…)。三种场景已实测:密钥拒读、ask 拒、ask 准。
 - **2026-06-23** —— 修 bug:`read_file` 截断原本按字节切,会把多字节字符(中文)从中间切断、产生非法 UTF-8;改为退到 rune 边界安全截断。

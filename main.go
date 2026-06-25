@@ -43,13 +43,14 @@ func main() {
 	}
 
 	fs := flag.NewFlagSet("repl", flag.ExitOnError)
-	memOverride := fs.String("memory", "", "覆盖记忆后端: inmem|postgres|redis")
+	memOverride := fs.String("memory", "", "覆盖记忆后端: none|inmem|filewiki|postgres|redis")
 	fs.Parse(args)
 
-	st, err := settings.Load(settingsPath)
-	if err != nil {
-		log.Fatalf("method=main load settings: %v", err)
-	}
+	sc := bufio.NewScanner(os.Stdin)
+	sc.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+
+	// 首次启动(没有 settings.json)就问一嘴记忆后端,而不是替你拍一个再兜底;带 -memory 则跳过。
+	st := firstRunOrLoad(sc, settingsPath, *memOverride)
 
 	backend := st.Memory.Backend
 	if *memOverride != "" {
@@ -59,6 +60,7 @@ func main() {
 	ctx := context.Background()
 	mem, err := memstore.New(ctx, memstore.Config{
 		Backend:       backend,
+		FileDir:       st.Memory.Dir,
 		PostgresDSN:   sec.PostgresDSN,
 		RedisAddr:     sec.RedisAddr,
 		RedisPassword: sec.RedisPassword,
@@ -66,8 +68,11 @@ func main() {
 	if err != nil {
 		log.Fatalf("method=main memory: %v", err)
 	}
-	if backend == "inmem" {
+	switch backend {
+	case "inmem":
 		log.Printf("method=main memory=inmem warning: restart loses all conversation memory")
+	case "none":
+		log.Printf("method=main memory=none warning: no cross-turn memory at all")
 	}
 
 	client := harness.NewClient(sec.DeepSeekBaseURL, sec.DeepSeekAPIKey, st.Model)
@@ -75,8 +80,6 @@ func main() {
 	reg.Add(harness.NowTool())
 	reg.Add(harness.ReadFileTool())
 
-	sc := bufio.NewScanner(os.Stdin)
-	sc.Buffer(make([]byte, 0, 64*1024), 1024*1024)
 	confirm := func(prompt string) bool { // ask 策略下在 REPL 里征求同意
 		fmt.Printf("%s (y/N) ", prompt)
 		if !sc.Scan() {
@@ -177,6 +180,54 @@ func loadSecrets() Secrets {
 		log.Fatalf("method=loadSecrets missing deepseek_api_key in %s", secretsPath)
 	}
 	return sec
+}
+
+// firstRunOrLoad:有 settings.json 就加载;没有则首次问一嘴记忆后端、存盘再用。
+// 带了 -memory 覆盖时不问(这次按覆盖值跑),但仍落一份默认 settings.json。
+func firstRunOrLoad(sc *bufio.Scanner, path, memOverride string) *settings.Settings {
+	const method = "firstRunOrLoad"
+	if _, err := os.Stat(path); err == nil {
+		st, err := settings.Load(path)
+		if err != nil {
+			log.Fatalf("method=%s load: %v", method, err)
+		}
+		return st
+	}
+	st := settings.Default()
+	if memOverride == "" {
+		st.Memory.Backend = pickBackend(sc)
+	}
+	if err := st.Save(path); err != nil {
+		log.Fatalf("method=%s save: %v", method, err)
+	}
+	log.Printf("method=%s first-run: memory backend=%s saved to %s", method, st.Memory.Backend, path)
+	return st
+}
+
+// pickBackend 首次启动时让用户选记忆后端;回车/乱输都按默认 filewiki。
+func pickBackend(sc *bufio.Scanner) string {
+	fmt.Println("首次启动:对话记忆存哪?(直接回车 = 默认 filewiki)")
+	fmt.Println("  1) filewiki  本地文件,落盘持久,无需 DB/容器(默认,推荐)")
+	fmt.Println("  2) inmem     纯内存,重启即丢")
+	fmt.Println("  3) postgres  存到 Postgres(需在 config.local.json 配 DSN)")
+	fmt.Println("  4) redis     对话维度,带 TTL(需在 config.local.json 配地址)")
+	fmt.Println("  5) none      不做记忆,每轮都是干净的")
+	fmt.Print("选择 [1-5]: ")
+	if !sc.Scan() {
+		return "filewiki"
+	}
+	switch strings.TrimSpace(sc.Text()) {
+	case "2":
+		return "inmem"
+	case "3":
+		return "postgres"
+	case "4":
+		return "redis"
+	case "5":
+		return "none"
+	default:
+		return "filewiki"
+	}
 }
 
 // subagentSystem 把角色拼成子 agent 的 system prompt(各司其职的人设)。

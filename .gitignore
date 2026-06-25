@@ -5,6 +5,9 @@ config.local.env
 # 本地运行时设置(后台改写;默认值由代码生成)
 settings.json
 
+# filewiki 记忆后端的本地对话文件
+memory/
+
 # 编译产物
 /My-Agent
 /mini-harness

@@ -9,7 +9,8 @@ import (
 )
 
 type Memory struct {
-	Backend string `json:"backend"` // inmem | postgres | redis
+	Backend string `json:"backend"`       // none | inmem | filewiki | postgres | redis
+	Dir     string `json:"dir,omitempty"` // filewiki 的存储目录(默认 memory)
 }
 
 // Runner 决定子 agent(spawn_subagent)在哪儿跑。
@@ -33,7 +34,7 @@ func Default() *Settings {
 			"When you have the final answer, reply directly without calling a tool.",
 		Model:    "deepseek-v4-pro",
 		MaxSteps: 8,
-		Memory:   Memory{Backend: "postgres"},
+		Memory:   Memory{Backend: "filewiki", Dir: "memory"}, // 无需 DB/容器、落盘持久,最省事的默认
 		Runner:   Runner{Mode: "local"},
 		Permissions: map[string]string{
 			"read":  "allow", // 只读默认放行
